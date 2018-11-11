@@ -92,6 +92,8 @@ class HikCamera(object):
 
         self.root_url = '{}:{}'.format(host, port)
 
+        self.eventStaleAfter = 5 #5 seconds by default
+
         # Build requests session for main thread calls
         # Default to basic authentication. It will change to digest inside
         # get_device_info if basic fails
@@ -131,6 +133,16 @@ class HikCamera(object):
     def current_event_states(self):
         """Return Event states dictionary"""
         return self.event_states
+
+    @property
+    def eventStaleAfter(self):
+        """Return The event auto stale timeout"""
+        return self._eventStaleAfter
+
+    @eventStaleAfter.setter    
+    def eventStaleAfter(self,value):
+        self._eventStaleAfter = int(value)
+
 
     def add_update_callback(self, callback, sensor):
         """Register as callback for when a matching device sensor changes."""
@@ -479,7 +491,7 @@ class HikCamera(object):
     def update_stale(self):
         """Update stale active statuses"""
         # Some events don't post an inactive XML, only active.
-        # If we don't get an active update for 5 seconds we can
+        # If we don't get an active update for configured seconds we can
         # assume the event is no longer active and update accordingly.
         for etype, echannels in self.event_states.items():
             for eprop in echannels:
@@ -487,7 +499,7 @@ class HikCamera(object):
                     sec_elap = ((datetime.datetime.now()-eprop[3])
                                 .total_seconds())
                     # print('Seconds since last update: {}'.format(sec_elap))
-                    if sec_elap > 5 and eprop[0] is True:
+                    if sec_elap > self.eventStaleAfter and eprop[0] is True:
                         _LOGGING.debug('Updating stale event %s on CH(%s)',
                                        etype, eprop[1])
                         attr = [False, eprop[1], eprop[2],
