@@ -92,7 +92,7 @@ class HikCamera(object):
 
         self.root_url = '{}:{}'.format(host, port)
 
-        self.eventStaleAfter = 5 #5 seconds by default
+        self._eventStaleAfter = 5 #5 seconds by default
 
         # Build requests session for main thread calls
         # Default to basic authentication. It will change to digest inside
@@ -499,7 +499,7 @@ class HikCamera(object):
                     sec_elap = ((datetime.datetime.now()-eprop[3])
                                 .total_seconds())
                     # print('Seconds since last update: {}'.format(sec_elap))
-                    if sec_elap > self.eventStaleAfter and eprop[0] is True:
+                    if sec_elap > self._eventStaleAfter and eprop[0] is True:
                         _LOGGING.debug('Updating stale event %s on CH(%s)',
                                        etype, eprop[1])
                         attr = [False, eprop[1], eprop[2],
