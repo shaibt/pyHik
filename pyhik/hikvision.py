@@ -91,18 +91,18 @@ class HikCamera(object):
         self.device_type = None
 
         self.root_url = '{}:{}'.format(host, port)
-
-        self._eventStaleAfter = 5 #5 seconds by default
-
+        
         # Build requests session for main thread calls
         # Default to basic authentication. It will change to digest inside
-        # get_device_info if basic fails
+        # get_device_info if basic fails        
         self.hik_request = requests.Session()
         self.hik_request.auth = (usr, pwd)
         self.hik_request.timeout = 5
         self.hik_request.headers.update(DEFAULT_HEADERS)
 
         # Define event stream processing thread
+        self._event_stale_timeout = 5       #5 seconds by default
+        self._retry_delay = 5               #5 seconds by default
         self.kill_thrd = threading.Event()
         self.reset_thrd = threading.Event()
         self.thrd = threading.Thread(
@@ -135,13 +135,22 @@ class HikCamera(object):
         return self.event_states
 
     @property
-    def eventStaleAfter(self):
+    def eventStaleTimeout(self):
         """Return The event auto stale timeout"""
-        return self._eventStaleAfter
+        return self._event_stale_timeout
 
-    @eventStaleAfter.setter    
-    def eventStaleAfter(self,value):
-        self._eventStaleAfter = int(value)
+    @eventStaleTimeout.setter    
+    def eventStaleTimeout(self,value):
+        self._event_stale_timeout = int(value)
+
+    @property
+    def retryDelay(self):
+        """Return the alert stream reconnect delay"""
+        return self._retry_delay
+
+    @retryDelay.setter    
+    def retryDelay(self,value):
+        self._retry_delay = int(value)
 
 
     def add_update_callback(self, callback, sensor):
@@ -434,18 +443,25 @@ class HikCamera(object):
                     # We need to reset the connection.
                     raise ValueError('Watchdog failed.')
 
+            except (ET.ParseError) as err:
+                ''' XML parsing errror '''
+                _LOGGING.warning('%s Parser failure - %s', self.name, err)
+                _LOGGING.debug('%s Dump of parse string: %s', self.name, parse_string)
+                parse_string = ""
+
             except (ValueError,
                     requests.exceptions.ChunkedEncodingError) as err:
+                ''' Couldn;t connect or recevied a reset from the watchdog '''
                 fail_count += 1
                 reset_event.clear()
                 _LOGGING.warning('%s Connection Failed. Waiting %ss. Err: %s',
-                                 self.name, (fail_count * 5) + 5, err)
+                                 self.name, (self._retry_delay) + 5, err)
                 parse_string = ""
                 self.watchdog.stop()
                 self.hik_request.close()
                 time.sleep(5)
                 self.update_stale()
-                time.sleep(fail_count * 5)
+                time.sleep(self._retry_delay)
                 continue
 
     def process_stream(self, tree):
@@ -470,6 +486,7 @@ class HikCamera(object):
 
         # Take care of keep-alive
         if len(etype) > 0 and etype == 'Video Loss':
+            _LOGGING.debug("Video Loss (keep alive): %s %s %s " % (estate, echid, ecount))
             self.watchdog.pet()
 
         # Track state if it's in the event list.
@@ -479,13 +496,10 @@ class HikCamera(object):
                 # Determine if state has changed
                 # If so, publish, otherwise do nothing
                 estate = (estate == 'active')
-                old_state = state[0]
                 attr = [estate, echid, int(ecount),
                         datetime.datetime.now()]
                 self.update_attributes(etype, echid, attr)
-
-                if estate != old_state:
-                    self.publish_changes(etype, echid)
+                self.publish_changes(etype, echid)
                 self.watchdog.pet()
 
     def update_stale(self):
@@ -499,7 +513,7 @@ class HikCamera(object):
                     sec_elap = ((datetime.datetime.now()-eprop[3])
                                 .total_seconds())
                     # print('Seconds since last update: {}'.format(sec_elap))
-                    if sec_elap > self._eventStaleAfter and eprop[0] is True:
+                    if sec_elap > self._event_stale_timeout and eprop[0] is True:
                         _LOGGING.debug('Updating stale event %s on CH(%s)',
                                        etype, eprop[1])
                         attr = [False, eprop[1], eprop[2],
