@@ -65,7 +65,7 @@ class HikCamera(object):
     """Creates a new Hikvision api device."""
 
     def __init__(self, host=None, port=DEFAULT_PORT,
-                 usr=None, pwd=None):
+                 usr=None, pwd=None, timeout=60.0):
         """Initialize device."""
 
         _LOGGING.debug("pyHik %s initializing new hikvision device at: %s",
@@ -73,7 +73,7 @@ class HikCamera(object):
 
         self.event_states = {}
 
-        self.watchdog = Watchdog(300.0, self.watchdog_handler)
+        self.watchdog = Watchdog(timeout * 2, self.watchdog_handler)
 
         self.namespace = XML_NAMESPACE
 
@@ -101,6 +101,7 @@ class HikCamera(object):
         self.hik_request.headers.update(DEFAULT_HEADERS)
 
         # Define event stream processing thread
+        self.connection_timeout = timeout   
         self._event_stale_timeout = 5       #5 seconds by default
         self._retry_delay = 5               #5 seconds by default
         self.kill_thrd = threading.Event()
@@ -297,14 +298,14 @@ class HikCamera(object):
         url = '%s/ISAPI/Event/triggers' % self.root_url
 
         try:
-            response = self.hik_request.get(url)
+            response = self.hik_request.get(url, timeout=self.connection_timeout)
             if response.status_code == requests.codes.not_found:
                 # Try alternate URL for triggers
                 _LOGGING.debug('Using alternate triggers URL.')
                 url = '%s/Event/triggers' % self.root_url
                 response = self.hik_request.get(url)
 
-        except requests.exceptions.RequestException as err:
+        except (requests.exceptions.RequestException, requests.exceptions.ConnectionError)as err:
             _LOGGING.error('Unable to fetch events, error: %s', err)
             return None
 
@@ -385,7 +386,7 @@ class HikCamera(object):
         using_digest = False
 
         try:
-            response = self.hik_request.get(url)
+            response = self.hik_request.get(url, timeout=self.connection_timeout)
             if response.status_code == requests.codes.unauthorized:
                 _LOGGING.debug('Basic authentication failed. Using digest.')
                 self.hik_request.auth = HTTPDigestAuth(self.usr, self.pwd)
@@ -405,7 +406,7 @@ class HikCamera(object):
                     using_digest = True
                     response = self.hik_request.get(url)
 
-        except requests.exceptions.RequestException as err:
+        except (requests.exceptions.RequestException, requests.exceptions.ConnectionError) as err:
             _LOGGING.error('Unable to fetch deviceInfo, error: %s', err)
             return None
 
@@ -468,7 +469,7 @@ class HikCamera(object):
         while True:
 
             try:
-                stream = self.hik_request.get(url, stream=True)
+                stream = self.hik_request.get(url, stream=True, timeout=self.connection_timeout)
                 if stream.status_code == requests.codes.not_found:
                     # Try alternate URL for stream
                     url = '%s/Event/notification/alertStream' % self.root_url
@@ -529,12 +530,13 @@ class HikCamera(object):
                 parse_string = ""
 
             except (ValueError,
+                    requests.exceptions.ConnectionError,
                     requests.exceptions.ChunkedEncodingError) as err:
-                ''' Couldn;t connect or recevied a reset from the watchdog '''
+                ''' Couldn't connect or recevied a reset from the watchdog '''
                 fail_count += 1
                 reset_event.clear()
-                _LOGGING.warning('%s Connection Failed. Waiting %ss. Err: %s',
-                                 self.name, (self._retry_delay) + 5, err)
+                _LOGGING.warning('%s Connection Failed (count=%d). Waiting %ss. Err: %s',
+                                 self.name, fail_count, (self._retry_delay) + 5, err)
                 parse_string = ""
                 self.watchdog.stop()
                 self.hik_request.close()
