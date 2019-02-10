@@ -37,7 +37,9 @@ from pyhik.constants import (
     DEFAULT_PORT, DEFAULT_HEADERS, XML_NAMESPACE, SENSOR_MAP,
     CAM_DEVICE, NVR_DEVICE, __version__)
 
+
 _LOGGING = logging.getLogger(__name__)
+
 
 # Hide nuisance requests logging
 logging.getLogger('urllib3').setLevel(logging.ERROR)
@@ -45,11 +47,7 @@ logging.getLogger('urllib3').setLevel(logging.ERROR)
 
 """
 Things still to do:
- - Support status of motion detection and turning on/off
  - Support status of day/night and switching
-
-Motion detection URL:
-http://X.X.X.X/ISAPI/System/Video/inputs/channels/1/motionDetection
 
 IR switch URL:
 http://X.X.X.X/ISAPI/Image/channels/1/ircutFilter
@@ -89,6 +87,8 @@ class HikCamera(object):
         self.cam_id = 0
         self.name = ''
         self.device_type = None
+        self.motion_detection = None
+        self._motion_detection_xml = None
 
         self.root_url = '{}:{}'.format(host, port)
         
@@ -152,6 +152,82 @@ class HikCamera(object):
     def retryDelay(self,value):
         self._retry_delay = int(value)
 
+    def current_motion_detection_state(self):
+        """Return current state of motion detection property"""
+        return self.motion_detection
+
+    def get_motion_detection(self):
+        url = ('%s/ISAPI/System/Video/inputs/'
+               'channels/1/motionDetection') % self.root_url
+
+        try:
+            response = self.hik_request.get(url)
+        except requests.exceptions.RequestException as err:
+            _LOGGING.error('Unable to fetch MotionDetection, error: %s', err)
+            self.motion_detection = None
+            return self.motion_detection
+
+        if response.status_code == requests.codes.unauthorized:
+            _LOGGING.error('Authentication failed')
+            self.motion_detection = None
+            return self.motion_detection
+
+        if response.status_code != requests.codes.ok:
+            # If we didn't receive 200, abort
+            _LOGGING.debug('Unable to fetch motion detection.')
+            self.motion_detection = None
+            return self.motion_detection
+
+        try:
+            tree = ET.fromstring(response.text)
+            ET.register_namespace("", self.namespace)
+            enabled = tree.find(self.element_query('enabled'))
+
+            if enabled is not None:
+                self._motion_detection_xml = tree
+            self.motion_detection = {'true': True, 'false': False}[enabled.text]
+            return self.motion_detection
+
+        except AttributeError as err:
+            _LOGGING.error('Entire response: %s', response.text)
+            _LOGGING.error('There was a problem: %s', err)
+            self.motion_detection = None
+            return self.motion_detection
+
+    def enable_motion_detection(self):
+        self._set_motion_detection(True)
+
+    def disable_motion_detection(self):
+        self._set_motion_detection(False)
+
+    def _set_motion_detection(self, enable):
+        url = ('%s/ISAPI/System/Video/inputs/'
+               'channels/1/motionDetection') % self.root_url
+
+        enabled = self._motion_detection_xml.find(self.element_query('enabled'))
+        if enabled is None:
+            _LOGGING.error("Couldn't find 'enabled' in the xml")
+            _LOGGING.error('XML: %s', ET.tostring(self._motion_detection_xml))
+            return
+
+        enabled.text = 'true' if enable else 'false'
+        xml = ET.tostring(self._motion_detection_xml)
+
+        try:
+            response = self.hik_request.put(url, data=xml)
+        except requests.exceptions.RequestException as err:
+            _LOGGING.error('Unable to set MotionDetection, error: %s', err)
+            return
+
+        if response.status_code == requests.codes.unauthorized:
+            _LOGGING.error('Authentication failed')
+            return
+
+        if response.status_code != requests.codes.ok:
+            # If we didn't receive 200, abort
+            _LOGGING.error('Unable to set motion detection: %s', response.text)
+
+        self.motion_detection = enable
 
     def add_update_callback(self, callback, sensor):
         """Register as callback for when a matching device sensor changes."""
@@ -195,7 +271,7 @@ class HikCamera(object):
                 for channel in channel_list:
                     try:
                         self.event_states.setdefault(
-                            SENSOR_MAP[event], []).append(
+                            SENSOR_MAP[event.lower()], []).append(
                                 [False, channel, 0, datetime.datetime.now()])
                     except KeyError:
                         # Sensor type doesn't have a known friendly name
@@ -206,6 +282,8 @@ class HikCamera(object):
             _LOGGING.debug('Initialized Dictionary: %s', self.event_states)
         else:
             _LOGGING.debug('No Events available in dictionary.')
+
+        self.get_motion_detection()
 
     def get_event_triggers(self):
         """
@@ -407,11 +485,12 @@ class HikCamera(object):
                     # _LOGGING.debug('Processing line from %s', self.name)
                     # filter out keep-alive new lines
                     if line:
-                        str_line = line.decode("utf-8")
+                        str_line = line.decode("utf-8", "ignore")
                         # New events start with --boundry
-                        if str_line.find('Content-Length') != -1:
+                        if str_line.find('<EventNotificationAlert') != -1:
                             # Start of event message
                             start_event = True
+                            parse_string += str_line
                         elif str_line.find('</EventNotificationAlert>') != -1:
                             # Message end found found
                             parse_string += str_line
@@ -468,7 +547,7 @@ class HikCamera(object):
         """Process incoming event stream packets."""
         try:
             etype = SENSOR_MAP[tree.find(
-                self.element_query('eventType')).text]
+                self.element_query('eventType')).text.lower()]
             estate = tree.find(
                 self.element_query('eventState')).text
             echid = tree.find(

@@ -2,13 +2,13 @@
 pyhik.constants
 ~~~~~~~~~~~~~~~~~~~~
 Constants list
-Copyright (c) 2016-2018 John Mihalic <https://github.com/mezz64>
+Copyright (c) 2016-2019 John Mihalic <https://github.com/mezz64>
 Licensed under the MIT license.
 """
 
 MAJOR_VERSION = 0
-MINOR_VERSION = 1
-SUB_MINOR_VERSION = 10
+MINOR_VERSION = 2
+SUB_MINOR_VERSION = 0
 __version__ = '{}.{}.{}'.format(
     MAJOR_VERSION, MINOR_VERSION, SUB_MINOR_VERSION)
 
@@ -22,7 +22,7 @@ DEFAULT_HEADERS = {
 }
 
 SENSOR_MAP = {
-    'VMD': 'Motion',
+    'vmd': 'Motion',
     'linedetection': 'Line Crossing',
     'fielddetection': 'Field Detection',
     'videoloss': 'Video Loss',
@@ -35,12 +35,12 @@ SENSOR_MAP = {
     'illaccess': 'Illegal Access',
     'videomismatch': 'Video Mismatch',
     'badvideo': 'Bad Video',
-    'PIR': 'PIR Alarm',
+    'pir': 'PIR Alarm',
     'facedetection': 'Face Detection',
     'scenechangedetection': 'Scene Change Detection',
-    'IO': 'I/O',
-    'unattendedBaggage': 'Unattended Baggage',
-    'attendedBaggage': 'Attended Baggage',
+    'io': 'I/O',
+    'unattendedbaggage': 'Unattended Baggage',
+    'attendedbaggage': 'Attended Baggage',
     'recordingfailure': 'Recording Failure'
 }
 
