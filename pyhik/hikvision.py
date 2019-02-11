@@ -73,7 +73,7 @@ class HikCamera(object):
 
         self.event_states = {}
 
-        self.watchdog = Watchdog(timeout * 2, self.watchdog_handler)
+        self.watchdog = Watchdog(300.0, self.watchdog_handler)
 
         self.namespace = XML_NAMESPACE
 
@@ -497,9 +497,15 @@ class HikCamera(object):
                             parse_string += str_line
                             start_event = False
                             if parse_string:
-                                tree = ET.fromstring(parse_string)
-                                self.process_stream(tree)
-                                self.update_stale()
+                                try:
+                                    tree = ET.fromstring(parse_string)
+                                    self.process_stream(tree)
+                                    self.update_stale()
+                                except (ET.ParseError) as err:
+                                    ''' XML parsing errror '''
+                                    _LOGGING.warning('%s Parser failure - %s', self.name, err)
+                                    _LOGGING.debug('%s Dump of parse string: %s', self.name, parse_string)
+
                                 parse_string = ""
                         else:
                             if start_event:
@@ -522,12 +528,6 @@ class HikCamera(object):
                 elif reset_event.is_set():
                     # We need to reset the connection.
                     raise ValueError('Watchdog failed.')
-
-            except (ET.ParseError) as err:
-                ''' XML parsing errror '''
-                _LOGGING.warning('%s Parser failure - %s', self.name, err)
-                _LOGGING.debug('%s Dump of parse string: %s', self.name, parse_string)
-                parse_string = ""
 
             except (ValueError,
                     requests.exceptions.ConnectionError,
