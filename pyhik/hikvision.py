@@ -108,7 +108,7 @@ class HikCamera(object):
         self.reset_thrd = threading.Event()
         self.thrd = threading.Thread(
             target=self.alert_stream, args=(self.reset_thrd, self.kill_thrd,))
-        self.thrd.daemon = False
+        self.thrd.daemon = True
 
         # Callbacks
         self._updateCallbacks = []
